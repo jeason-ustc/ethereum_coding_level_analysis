@@ -1,0 +1,130 @@
+我们知道整个比特币，以太坊的基石就是椭圆曲线加密算法。所有的数据均需要发起者通过私匙签发，其它人通过非对称的公匙验证确实消息的真实性。下面我们就一起来了解一下椭圆曲线加密算法，并使用以太坊提供的工具对要发送的数据进行数字签名，以及使用Solidity区块链编程语言的ecrecover()校验数字签名的合法性。
+
+椭圆曲线DSA(ECDSA)简介
+
+假如Alice要对消息m加上数字签名，而Bob需要验证该签名。
+
+生成数字签名
+
+Alice根据随机数r和基点G求出点rG = (x, y)；
+Alicce根据随机数r、消息m的散列值h、和私匙a计算
+
+s=h+axrs=h+axr
+最后，Alice将消息m、点rG = (x, y)和s发送给Bob，其中点rG和s就是数字签名。
+
+验证数字签名
+
+Bob接收到消息m、点rG = (x, y)和s。
+Bob根据消息求出散列值h。
+最后，Bob根据上述信息，用Alice的公匙进行以下计算。
+hsG+xs(aG)
+hsG+xs(aG)
+最后让上述计算结果与rG进行比较看是否相等。
+
+如果签名结果正确，则计算结果应如下所示。
+
+hsG+xsaG=(h+ax)sG
+hsG+xsaG=(h+ax)sG
+=r(h+ax)h+axG
+=r(h+ax)h+axG
+
+=rG
+=rG
+原书1中关于这部分看了三四遍，也没看明白。但觉得做程序的明白他大概要干个什么就好。大体上来说，对于要签名的数据m，使用它的哈希后的结果h，会生成签名。签名结果分为r，s，v三段值。其中r，s为32字节。v为一个字节，如果要用ecrecover()算法来验签，需对v值加27来组成27，28这两个值中的一个2。
+
+实践
+
+使用web3.js进行数据签名
+
+以太坊提供了web3.eth.sign方法来对数据生成数字签名。
+
+//初始化基本对象
+var Web3 = require('web3');
+var web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+
+var account = web3.eth.accounts[0];
+var sha3Msg = web3.sha3("abc");
+var signedData = web3.eth.sign(account, sha3Msg);
+
+console.log("account: " + account);
+console.log("sha3(message): " + sha3Msg);
+console.log("Signed data: " + signedData);
+
+在上面的代码中，我们先将要签名的数据abc生成哈希串，使用web3.sha3("abc")。接着我们使用当前连接节点的第一个默认帐户进行签名。
+
+由于我使用的是EtherumJS TestRPC，它默认打开了帐户。否则，你还需要web3.personal.unlockAccount("0x..", "<passs>", 1000)3来打开数据签名所使用帐户。需要注意的是，当你打开你的帐户时，可能有安全风险。因为其它程序也可以通过访问节点进行类似的sign，这意味着，他们可以伪造你的数据4，包括以你的名义发起交易，转走你的钱。
+
+运行的结果：
+
+$ node test.js
+account: 0x60320b8a71bc314404ef7d194ad8cac0bee1e331
+sha3(message): 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45
+Signed data: 0xf4128988cbe7df8315440adde412a8955f7f5ff9a5468a791433727f82717a6753bd71882079522207060b681fbd3f5623ee7ed66e33fc8e581f442acbcf6ab800
+以太坊客户端
+
+如果你使用以太坊的客户端进行签名时，它们会在你要签名的数据前增加前缀\x19Ethereum Signed Message:\n5，感谢读者@刘兵同学的反馈。
+
+eth_sign
+
+The sign method calculates an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message))).
+
+By adding a prefix to the message makes the calculated signature recognisable as an Ethereum specific signature. This prevents misuse where a malicious DApp can sign arbitrary data (e.g. transaction) and use the signature to impersonate the victim.
+使用ecrecover()对签名数据进行验签
+
+ecrecover6函数是由以太坊提供的一个全局函数，用于签名数据的校验。与上面所陈述的方式略有不同的是，这个函数返回的是签名者的公匙地址。如果返回结果是签名者的公匙地址，那么说明数据是正确的。
+
+ecrecover(bytes32 hash, uint8 v, bytes32 r, bytes32 s) returns (address)
+ecrecover函数需要四个参数，需要被签名数据的哈希结果值，r，s，v三个值。通过前面的说明，我们知道r，s，v是分别来自签名结果串。
+
+r = signature[0:64]
+s = signature[64:128]
+v = signature[128:130]
+其中v取出来的值或者是00或01。要使用时，我们先要将其转为整型，再加上27，所以我们将得到27或28。在调用函数时v将填入27或28。
+
+如果要在以太坊中验证比特币的签名，可能有几处不同的地方7。
+
+下面来看看使用Solidity的ecrecoverDecode验证签名的完整例子。
+
+pragma solidity ^0.4.4;
+
+contract Decode{
+  //公匙：0x60320b8a71bc314404ef7d194ad8cac0bee1e331
+  //sha3(msg): 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45 (web3.sha3("abc");)
+  //签名后的数据：0xf4128988cbe7df8315440adde412a8955f7f5ff9a5468a791433727f82717a6753bd71882079522207060b681fbd3f5623ee7ed66e33fc8e581f442acbcf6ab800
+
+  //验签数据入口函数
+  function decode() returns (address){
+    bytes memory signedString =hex"f4128988cbe7df8315440adde412a8955f7f5ff9a5468a791433727f82717a6753bd71882079522207060b681fbd3f5623ee7ed66e33fc8e581f442acbcf6ab800";
+
+    bytes32  r = bytesToBytes32(slice(signedString, 0, 32));
+    bytes32  s = bytesToBytes32(slice(signedString, 32, 32));
+    byte  v = slice(signedString, 64, 1)[0];
+    return ecrecoverDecode(r, s, v);
+  }
+
+  //将原始数据按段切割出来指定长度
+  function slice(bytes memory data, uint start, uint len) returns (bytes){
+    bytes memory b = new bytes(len);
+
+    for(uint i = 0; i < len; i++){
+      b[i] = data[i + start];
+    }
+
+    return b;
+  }
+
+  //使用ecrecover恢复公匙
+  function ecrecoverDecode(bytes32 r, bytes32 s, byte v1) returns (address addr){
+     uint8 v = uint8(v1) + 27;
+     addr = ecrecover(hex"4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45", v, r, s);
+  }
+
+  //bytes转换为bytes32
+  function bytesToBytes32(bytes memory source) returns (bytes32 result) {
+    assembly {
+        result := mload(add(source, 32))
+    }
+  }
+}
+
+上述代码使用临时写的slice()函数把数据签名中的r，s，v切割出来；由于返回的仍是一个bytes类型，所以我们使用bytesToBytes32()进行一下类型转换8；另外需要注意的是ecrecoverDecode()根据前面的说明，我们需要对v值，加上27后再进行调用。最后调用decode()函数，我们将会得到公匙0x60320b8a71bc314404ef7d194ad8cac0bee1e331。
